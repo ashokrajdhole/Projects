@@ -1,1 +1,142 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "DHT.h"
+#include <WiFi.h>
+#include <Firebase_ESP_Client.h>
 
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+
+#define DHTPIN 4            // Pin where the DHT11 is connected
+#define DHTTYPE DHT11       // DHT 11
+#define LED_BUZZER_PIN 12   // Pin where the LED and buzzer are connected
+#define RELAY_PIN 13        // Pin where the relay is connected
+#define FAN_PIN 14          // Pin where the fan is connected
+#define FLAME_SENSOR_PIN 15 // Pin where the flame sensor is connected
+#define SMOKE_SENSOR_PIN 34 // Pin where the MQ6 smoke sensor is connected
+
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Insert your network credentials
+#define WIFI_SSID "Redmi 10"
+#define WIFI_PASSWORD "12345678"
+
+// Insert Firebase project API Key
+#define API_KEY "AIzaSyB_21KACY2mz8_5Msqn8b-vD6m7X_aEqDQ"
+
+// Insert RTDB URL
+#define DATABASE_URL "https://ashu-7a503-default-rtdb.firebaseio.com/"
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+void setup() {
+  pinMode(LED_BUZZER_PIN, OUTPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(FAN_PIN, OUTPUT);
+  pinMode(FLAME_SENSOR_PIN, INPUT);
+  pinMode(SMOKE_SENSOR_PIN, INPUT);
+
+  dht.begin();
+  Serial.begin(9600);
+  delay(1000);
+
+  // Connect to WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+
+  // Initialize Firebase configuration
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+
+  // Firebase signup
+  if (!Firebase.signUp(&config, &auth, "", "")) {
+    Serial.println("Firebase signup failed");
+    while (1);
+  }
+
+  // Begin Firebase
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  // Wait for Firebase connection
+  while (!Firebase.ready()) {
+    delay(500);
+  }
+  Serial.println("Firebase Connection Successful");
+
+  // Clear the display
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+}
+
+void loop() {
+  // Read sensor values
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+  int flameDetected = digitalRead(FLAME_SENSOR_PIN);
+  int smokeLevel = analogRead(SMOKE_SENSOR_PIN);
+
+  // Map smoke level to actual reading (adjust these values based on calibration)
+  int actualSmokeLevel = map(smokeLevel, 0, 4095, 0, 100);
+
+  // Update Firebase with sensor data
+  if (Firebase.ready()) {
+    Firebase.RTDB.setFloat(&fbdo, "/humidity", humidity);
+    Firebase.RTDB.setFloat(&fbdo, "/temperature", temperature);
+    Firebase.RTDB.setInt(&fbdo, "/flameDetected", flameDetected);
+    Firebase.RTDB.setInt(&fbdo, "/smokeLevel", actualSmokeLevel);
+  }
+
+  // Control LED and buzzer based on flame and smoke detection
+  if (flameDetected == HIGH || actualSmokeLevel > 50) {
+    digitalWrite(LED_BUZZER_PIN, HIGH);
+  } else {
+    digitalWrite(LED_BUZZER_PIN, LOW);
+  }
+
+  // Update display with sensor readings
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Temperature: " + String(temperature) + " C");
+  display.println("Humidity: " + String(humidity) + " %");
+  display.println("Flame Detected: " + String(flameDetected == HIGH ? "Yes" : "No"));
+  display.println("Smoke Level: " + String(actualSmokeLevel) + " %");
+  display.println("Relay Status: " + String(digitalRead(RELAY_PIN) == HIGH ? "On" : "Off"));
+  display.println("Fan Status: " + String(digitalRead(FAN_PIN) == HIGH ? "On" : "Off"));
+  display.display();
+
+  // Print sensor readings and status to serial monitor
+  Serial.println("\n---------------- Sensor Readings ----------------");
+  Serial.println("Temperature: " + String(temperature) + " C");
+  Serial.println("Humidity: " + String(humidity) + " %");
+  Serial.println("Flame Detected: " + String(flameDetected == HIGH ? "Yes" : "No"));
+  Serial.println("Smoke Level: " + String(actualSmokeLevel) + " %");
+  Serial.println("Relay Status: " + String(digitalRead(RELAY_PIN) == HIGH ? "On" : "Off"));
+  Serial.println("Fan Status: " + String(digitalRead(FAN_PIN) == HIGH ? "On" : "Off"));
+  Serial.println("-------------------------------------------------\n");
+
+  // Check for Firebase commands to control relay and fan
+  if (Firebase.RTDB.getInt(&fbdo, "/relayControl")) {
+    int relayControl = fbdo.intData();
+    digitalWrite(RELAY_PIN, relayControl);
+  }
+
+  if (Firebase.RTDB.getInt(&fbdo, "/fanControl")) {
+    int fanControl = fbdo.intData();
+    digitalWrite(FAN_PIN, fanControl);
+  }
+
+  delay(1000); // Update every 1 second
+}
