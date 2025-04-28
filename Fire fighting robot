@@ -1,0 +1,130 @@
+#define in1 9
+#define in2 8
+#define in3 7
+#define in4 6
+#define enA 10
+#define enB 5
+
+#define ir_L A0
+#define ir_F A1
+#define ir_R A2
+#define relay 12
+#define buzzer 13
+#define servoPin 11
+
+int Speed = 160; // PWM motor speed
+int sL, sF, sR;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(ir_L, INPUT);
+  pinMode(ir_F, INPUT);
+  pinMode(ir_R, INPUT);
+  pinMode(relay, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(servoPin, OUTPUT);
+
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(enA, OUTPUT);
+  pinMode(enB, OUTPUT);
+
+  analogWrite(enA, Speed);
+  analogWrite(enB, Speed);
+
+  digitalWrite(relay, HIGH);  // Relay OFF initially
+  digitalWrite(buzzer, LOW);  // Buzzer OFF initially
+}
+
+void loop() {
+  sL = analogRead(ir_L);
+  sF = analogRead(ir_F);
+  sR = analogRead(ir_R);
+
+  Serial.print("Left: "); Serial.print(sL);
+  Serial.print(" | Front: "); Serial.print(sF);
+  Serial.print(" | Right: "); Serial.println(sR);
+
+  bool fireDetected = (sL < 250 || sF < 250 || sR < 250);
+
+  if (fireDetected) {
+    digitalWrite(relay, LOW);   // Relay ON
+    digitalWrite(buzzer, HIGH); // Buzzer ON
+
+    // Slightly turn toward the fire
+    if (sR < 250 && sL >= 250 && sF >= 250) {
+      turnRightSlight();
+      delay(300);
+    } else if (sL < 250 && sR >= 250 && sF >= 250) {
+      turnLeftSlight();
+      delay(300);
+    }
+
+    // Move forward ~15 cm
+    moveForward();
+    delay(800);
+    stopMotors();
+
+    // Servo sweep until fire is gone
+    while (analogRead(ir_L) < 250 || analogRead(ir_F) < 250 || analogRead(ir_R) < 250) {
+      for (int angle = 60; angle <= 120; angle += 5) {
+        servoPulse(servoPin, angle);
+      }
+      for (int angle = 120; angle >= 60; angle -= 5) {
+        servoPulse(servoPin, angle);
+      }
+    }
+
+    // Fire extinguished
+    digitalWrite(relay, HIGH);  // Relay OFF
+    digitalWrite(buzzer, LOW);  // Buzzer OFF
+    stopMotors();
+  } else {
+    digitalWrite(relay, HIGH);
+    digitalWrite(buzzer, LOW);
+    stopMotors();
+  }
+
+  delay(100);
+}
+
+void moveForward() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+}
+
+void stopMotors() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
+
+void turnRightSlight() {
+  // Left motors ON, right motors OFF
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+}
+
+void turnLeftSlight() {
+  // Right motors ON, left motors OFF
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
+
+void servoPulse(int pin, int angle) {
+  int pwm = (angle * 11) + 500;
+  digitalWrite(pin, HIGH);
+  delayMicroseconds(pwm);
+  digitalWrite(pin, LOW);
+  delay(20);
+}
